@@ -32,6 +32,7 @@ int main(int argc, char **argv) {
     int sockfd; /* socket */
     int portno; /* port to listen on */
     int clientlen; /* byte size of client's address */
+    int lastAcked = -1; //the seqno.of last acked packet.
     struct sockaddr_in serveraddr; /* server's addr */
     struct sockaddr_in clientaddr; /* client addr */
     int optval; /* flag value for setsockopt */
@@ -108,6 +109,19 @@ int main(int argc, char **argv) {
             fclose(fp);
             break;
         }
+
+ 
+        if ( (lastAcked>0) && (recvpkt->hdr.seqno != lastAcked)){ //.Out of order packet.
+            VLOG(DEBUG, "DoubleACK: seqno: %d and lastAcked: %d ",
+                recvpkt->hdr.seqno, lastAcked);
+
+        //. resend the last in order packet.
+        if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
+                (struct sockaddr *) &clientaddr, clientlen) < 0) {
+            error("ERROR in sendto");
+        }
+        continue;
+        }
         /* 
          * sendto: ACK back to the client 
          */
@@ -123,6 +137,8 @@ int main(int argc, char **argv) {
                 (struct sockaddr *) &clientaddr, clientlen) < 0) {
             error("ERROR in sendto");
         }
+
+        lastAcked = sndpkt->hdr.ackno;
     }
 
     return 0;

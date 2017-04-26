@@ -181,7 +181,7 @@ int main (int argc, char **argv)
         
         //realease all the packets.
         for (j=0; j<unackPackets; j++){
-            VLOG(DEBUG, "Sending packet %d with size %d to %s", 
+            VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
                 j, sizeof(*(cwnd_buffer[j])), inet_ntoa(serveraddr.sin_addr));
 
 
@@ -190,6 +190,23 @@ int main (int argc, char **argv)
             {
                 error("sendto");
             }
+        }
+        
+        
+        while (unackPackets != 0){
+            if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
+                        (struct sockaddr *) &serveraddr, (socklen_t *)&serverlen) < 0)
+            {
+                error("recvfrom");
+            }
+
+            recvpkt = (tcp_packet *)buffer;
+
+            // .Simple print statement to expose every ACK
+            
+
+            VLOG(DEBUG, "ACKed packet with seq no. %d", recvpkt->hdr.ackno);
+            --unackPackets;
         }
         
 
