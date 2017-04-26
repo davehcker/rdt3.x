@@ -27,6 +27,7 @@
 
 int next_seqno=0;
 int send_base=0;
+//int window_base;
 int window_size = 1;
 int unackPackets;
 
@@ -36,8 +37,53 @@ struct itimerval timer;
 tcp_packet *sndpkt;
 tcp_packet *recvpkt;
 tcp_packet *cwnd_buffer[10];
-sigset_t sigmask;       
+sigset_t sigmask;    
 
+
+typedef struct node_packet{
+    tcp_packet *packet;
+    struct node_packet *nextPacket;
+} node_packet;
+
+node_packet *cwnd_begin = 0;   
+node_packet *cwnd_end;
+
+/* .pushes a packet onto the cwnd lifo. Because the
+    cwnd is a fixed size window, it is our
+    responsibility to ensure that we don't cross
+    the cwnd boundary.
+*/
+void push_packet(tcp_packet *packet){
+    if (cwnd_begin == 0){
+            cwnd_begin = malloc(sizeof(node_packet));
+            cwnd_begin-> packet = packet;
+            cwnd_begin-> nextPacket = 0;
+            cwnd_end = cwnd_begin;
+    }
+    else{
+        cwnd_end -> nextPacket = malloc(sizeof(node_packet));
+        cwnd_end = cwnd_end -> nextPacket;
+        cwnd_end -> packet = packet;
+        cwnd_end -> nextPacket = 0;
+    }
+    
+    
+}
+
+/* pop frees the address pointed to by begin and reassigns it
+    to the next element in LIFO.
+    */
+void pop_packet(){
+    if (cwnd_begin == 0){
+        return;
+    }
+    else{
+        node_packet *temp = cwnd_begin;
+        cwnd_begin = cwnd_begin -> nextPacket;
+        free(temp);
+        return;
+    }
+}
 
 void resend_packets(int sig)
 {
@@ -148,6 +194,8 @@ int main (int argc, char **argv)
 
         // . fill the cwnd buffer.]
         unackPackets = 0;
+        //window_base = next_seqno;
+
         for (i = 0; i < CWND; i++){
             len = fread(buffer, 1, DATA_SIZE, fp);
             if ( len <= 0)
@@ -155,6 +203,7 @@ int main (int argc, char **argv)
             VLOG(INFO, "End Of File has been reached");
             sndpkt = make_packet(0);
             cwnd_buffer[i] = sndpkt;
+            push_packet(sndpkt);
             unackPackets += 1;
 
             if (unackPackets == 1){
@@ -172,6 +221,7 @@ int main (int argc, char **argv)
             memcpy(sndpkt->data, buffer, len);
             sndpkt->hdr.seqno = send_base;
             cwnd_buffer[i] = sndpkt;
+            push_packet(sndpkt);
             unackPackets += 1;
         }
         //Wait for ACK
@@ -180,6 +230,7 @@ int main (int argc, char **argv)
 
         
         //realease all the packets.
+        /*
         for (j=0; j<unackPackets; j++){
             VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
                 j, sizeof(*(cwnd_buffer[j])), inet_ntoa(serveraddr.sin_addr));
@@ -192,6 +243,20 @@ int main (int argc, char **argv)
             }
         }
         
+        */
+    for (j=0; j<unackPackets; j++){
+            VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
+                j, sizeof(*(cwnd_begin -> packet)), inet_ntoa(serveraddr.sin_addr));
+
+
+            if(sendto(sockfd, cwnd_begin -> packet, sizeof(*(cwnd_begin -> packet)), 0, 
+                        ( const struct sockaddr *)&serveraddr, serverlen) < 0)
+            {
+                error("sendto");
+            }
+            pop_packet();
+        }
+
         
         while (unackPackets != 0){
             if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
@@ -204,7 +269,10 @@ int main (int argc, char **argv)
 
             // .Simple print statement to expose every ACK
             
-
+            if (recvpkt->hdr.ackno < send_base){
+                VLOG(DEBUG, "DOUBLE ACK seqno.");
+                continue;
+            }
             VLOG(DEBUG, "ACKed packet with seq no. %d", recvpkt->hdr.ackno);
             --unackPackets;
         }

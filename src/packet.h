@@ -18,4 +18,5 @@ typedef struct {
     char    data[0];
 }tcp_packet;
 
+
 tcp_packet* make_packet(int seq);
