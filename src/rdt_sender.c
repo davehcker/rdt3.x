@@ -22,17 +22,20 @@
 #include"common.h"
 
 #define STDIN_FD    0
-#define RETRY  120 //milli second 
+#define RETRY  1500 //milli second 
+#define CWND 10
 
 int next_seqno=0;
 int send_base=0;
 int window_size = 1;
+int unackPackets;
 
 int sockfd, serverlen;
 struct sockaddr_in serveraddr;
 struct itimerval timer; 
 tcp_packet *sndpkt;
 tcp_packet *recvpkt;
+tcp_packet *cwnd_buffer[10];
 sigset_t sigmask;       
 
 
@@ -82,11 +85,19 @@ void init_timer(int delay, void (*sig_handler)(int))
     sigaddset(&sigmask, SIGALRM);
 }
 
+/* Sleep for given number of seconds. Can be interrupted by
+ singnals.
+*/
+void waitFor (unsigned int secs) {
+    unsigned int retTime = time(0) + secs;   // Get finishing time.
+    while (time(0) < retTime);               // Loop until it arrives.
+}
 
 int main (int argc, char **argv)
 {
-    int portno, len;
+    int portno, len, fileEnd = 0;
     int next_seqno;
+    int i, j;
     char *hostname;
     char buffer[DATA_SIZE];
     FILE *fp;
@@ -130,26 +141,65 @@ int main (int argc, char **argv)
     init_timer(RETRY, resend_packets);
     next_seqno = 0;
     while (1)
-    {
-        len = fread(buffer, 1, DATA_SIZE, fp);
-        if ( len <= 0)
-        {
+    {   
+        if (fileEnd == 1){
+            break; //. We shouldn't and needn't do anything else. 
+        }
+
+        // . fill the cwnd buffer.]
+        unackPackets = 0;
+        for (i = 0; i < CWND; i++){
+            len = fread(buffer, 1, DATA_SIZE, fp);
+            if ( len <= 0)
+            {
             VLOG(INFO, "End Of File has been reached");
             sndpkt = make_packet(0);
-            sendto(sockfd, sndpkt, TCP_HDR_SIZE,  0,
-                    (const struct sockaddr *)&serveraddr, serverlen);
+            cwnd_buffer[i] = sndpkt;
+            unackPackets += 1;
+
+            if (unackPackets == 1){
+                fileEnd = 1;
+            }
+            //sendto(sockfd, sndpkt, TCP_HDR_SIZE,  0,
+            //        (const struct sockaddr *)&serveraddr, serverlen);
             break;
+            }
+
+            send_base = next_seqno;
+            next_seqno = send_base + len;
+            
+            sndpkt = make_packet(len);
+            memcpy(sndpkt->data, buffer, len);
+            sndpkt->hdr.seqno = send_base;
+            cwnd_buffer[i] = sndpkt;
+            unackPackets += 1;
         }
-        send_base = next_seqno;
-        next_seqno = send_base + len;
-        sndpkt = make_packet(len);
-        memcpy(sndpkt->data, buffer, len);
-        sndpkt->hdr.seqno = send_base;
         //Wait for ACK
+
+        //waitFor(1); // . Wait for a given number of seconds between every trans.
+
+        
+        //realease all the packets.
+        for (j=0; j<unackPackets; j++){
+            VLOG(DEBUG, "Sending packet %d with size %d to %s", 
+                j, sizeof(*(cwnd_buffer[j])), inet_ntoa(serveraddr.sin_addr));
+
+
+            if(sendto(sockfd, cwnd_buffer[j], sizeof(*(cwnd_buffer[j])), 0, 
+                        ( const struct sockaddr *)&serveraddr, serverlen) < 0)
+            {
+                error("sendto");
+            }
+        }
+        
+
+        /*
         do {
             VLOG(DEBUG, "Sending packet %d to %s", 
                     send_base, inet_ntoa(serveraddr.sin_addr));
-            if(sendto(sockfd, sndpkt, sizeof(*sndpkt), 0, 
+
+
+            if(sendto(sockfd, cwnd_buffer[9], sizeof(*(cwnd_buffer[9])), 0, 
                         ( const struct sockaddr *)&serveraddr, serverlen) < 0)
             {
                 error("sendto");
@@ -169,17 +219,22 @@ int main (int argc, char **argv)
 
             recvpkt = (tcp_packet *)buffer;
 
-            /* .Simple print statement to expose every ACK
-            */
+            // .Simple print statement to expose every ACK
             
+
             VLOG(DEBUG, "ACKed packet with seq no. %d", recvpkt->hdr.ackno);
 
             stop_timer();
 
-            /*resend pack if dont recv ack */
+            // resend pack if dont recv ack 
         } while(recvpkt->hdr.ackno != next_seqno);
 
         free(sndpkt);
+        
+
+    */
+        
+
     }
 
     return 0;
