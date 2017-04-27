@@ -27,7 +27,7 @@
 
 int next_seqno=0;
 int send_base=0;
-//int window_base;
+int last_acked = 0;
 int window_size = 1;
 int unackPackets;
 
@@ -36,17 +36,15 @@ struct sockaddr_in serveraddr;
 struct itimerval timer; 
 tcp_packet *sndpkt;
 tcp_packet *recvpkt;
-tcp_packet *cwnd_buffer[10];
 sigset_t sigmask;    
-
 
 typedef struct node_packet{
     tcp_packet *packet;
     struct node_packet *nextPacket;
 } node_packet;
-
 node_packet *cwnd_begin = 0;   
 node_packet *cwnd_end;
+
 
 /* .pushes a packet onto the cwnd lifo. Because the
     cwnd is a fixed size window, it is our
@@ -81,8 +79,11 @@ void pop_packet(){
         node_packet *temp = cwnd_begin;
         cwnd_begin = cwnd_begin -> nextPacket;
         free(temp);
+        if (cwnd_begin != 0)
+        VLOG(DEBUG, "...Current window head at %d", cwnd_begin->packet->hdr.seqno);
         return;
     }
+
 }
 
 void resend_packets(int sig)
@@ -92,11 +93,13 @@ void resend_packets(int sig)
         //Resend all packets range between 
         //sendBase and nextSeqNum
         VLOG(INFO, "Timout happend");
+        /*
         if(sendto(sockfd, sndpkt, sizeof(*sndpkt), 0, 
                     ( const struct sockaddr *)&serveraddr, serverlen) < 0)
         {
             error("sendto");
         }
+        */
     }
 }
 
@@ -130,7 +133,6 @@ void init_timer(int delay, void (*sig_handler)(int))
     sigemptyset(&sigmask);
     sigaddset(&sigmask, SIGALRM);
 }
-
 /* Sleep for given number of seconds. Can be interrupted by
  singnals.
 */
@@ -139,11 +141,36 @@ void waitFor (unsigned int secs) {
     while (time(0) < retTime);               // Loop until it arrives.
 }
 
+
+/* Resends all the unacknowledged packets.
+*/
+void releaseAllPackets(){
+    int j = 1;
+    node_packet *temp = cwnd_begin;
+    VLOG(DEBUG, "Going to send packets");
+    while (temp != 0){
+        VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
+             j++, sizeof(*(temp -> packet)), inet_ntoa(serveraddr.sin_addr));
+
+
+        if(sendto(sockfd, temp -> packet, TCP_HDR_SIZE+temp->packet->hdr.data_size, 0, 
+                  ( const struct sockaddr *)&serveraddr, serverlen) < 0){
+            error("sendto");
+        }
+        VLOG(DEBUG, "Seq number sent %d ", temp ->packet ->hdr.seqno);
+        //waitFor(1);
+            //pop_packet();
+        temp = temp -> nextPacket;
+    }
+
+}
+
+
 int main (int argc, char **argv)
 {
     int portno, len, fileEnd = 0;
     int next_seqno;
-    int i, j;
+    int i;
     char *hostname;
     char buffer[DATA_SIZE];
     FILE *fp;
@@ -186,144 +213,119 @@ int main (int argc, char **argv)
 
     init_timer(RETRY, resend_packets);
     next_seqno = 0;
-    while (1)
-    {   
-        if (fileEnd == 1){
-            break; //. We shouldn't and needn't do anything else. 
-        }
 
-        // . fill the cwnd buffer.]
-        unackPackets = 0;
-        //window_base = next_seqno;
+    /* Start the control window.
+     * We start by filling the control window with cwnd
+     * number of packets. Once we have done that, we realease
+     * all the packets into the UDP socket.
+    */
 
-        for (i = 0; i < CWND; i++){
-            len = fread(buffer, 1, DATA_SIZE, fp);
-            if ( len <= 0)
-            {
-            VLOG(INFO, "End Of File has been reached");
+
+    // . fill the cwnd buffer.]
+    unackPackets = 0;
+    for (i = 0; (i < CWND) && (fileEnd != 1); i++){
+        len = fread(buffer, 1, DATA_SIZE, fp);
+        if ( len <= 0){
+            VLOG(INFO, "EOF File has been reached");
             sndpkt = make_packet(0);
-            cwnd_buffer[i] = sndpkt;
             push_packet(sndpkt);
             unackPackets += 1;
-
-            if (unackPackets == 1){
-                fileEnd = 1;
-            }
-            //sendto(sockfd, sndpkt, TCP_HDR_SIZE,  0,
-            //        (const struct sockaddr *)&serveraddr, serverlen);
-            break;
-            }
-
-            send_base = next_seqno;
-            next_seqno = send_base + len;
+            fileEnd = 1;
+            continue;
+        }
+ 
             
-            sndpkt = make_packet(len);
-            memcpy(sndpkt->data, buffer, len);
-            sndpkt->hdr.seqno = send_base;
-            cwnd_buffer[i] = sndpkt;
-            push_packet(sndpkt);
-            unackPackets += 1;
-        }
-        //Wait for ACK
 
-        //waitFor(1); // . Wait for a given number of seconds between every trans.
-
-        
-        //realease all the packets.
-        /*
-        for (j=0; j<unackPackets; j++){
-            VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
-                j, sizeof(*(cwnd_buffer[j])), inet_ntoa(serveraddr.sin_addr));
-
-
-            if(sendto(sockfd, cwnd_buffer[j], sizeof(*(cwnd_buffer[j])), 0, 
-                        ( const struct sockaddr *)&serveraddr, serverlen) < 0)
-            {
-                error("sendto");
-            }
-        }
-        
-        */
-    for (j=0; j<unackPackets; j++){
-            VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
-                j, sizeof(*(cwnd_begin -> packet)), inet_ntoa(serveraddr.sin_addr));
-
-
-            if(sendto(sockfd, cwnd_begin -> packet, sizeof(*(cwnd_begin -> packet)), 0, 
-                        ( const struct sockaddr *)&serveraddr, serverlen) < 0)
-            {
-                error("sendto");
-            }
-            pop_packet();
-        }
+        send_base = next_seqno;
+        next_seqno = send_base + len;
+        sndpkt = make_packet(len);
+        memcpy(sndpkt->data, buffer, len);
+        sndpkt->hdr.seqno = send_base;
+        push_packet(sndpkt);
+        unackPackets+= 1;
+    }
+    
 
         
-        while (unackPackets != 0){
-            if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
-                        (struct sockaddr *) &serveraddr, (socklen_t *)&serverlen) < 0)
-            {
+        
+    
+    releaseAllPackets();
+
+
+    /* RDT transmission window in action.
+     * Once we have released all the initial packets,
+     * we get into a loop which runs until the whole file
+     * has been sent across the network.
+     *
+     * The loop is controlled by the number of unacked
+     * packets. There are three main actions at work here.
+     * 1. An ACK is received.
+     * 1.1. The ACK is not a double ACK, we slide the window.
+     * 1.2. If it's a double ACK, we do fast retransmit.
+     * 2. No ACK is received, but the timer event fires
+     * SIGALRM signal. Then we resend all the packets in the 
+     * cwnd buffer.
+     */
+    int doubleACKS = 0;
+    do{ 
+        if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
+            (struct sockaddr *) &serveraddr, (socklen_t *)&serverlen) < 0){
                 error("recvfrom");
+        }
+
+        recvpkt = (tcp_packet *)buffer;
+        VLOG(DEBUG, "Received packet with ack no. %d", recvpkt->hdr.ackno);
+
+        if (recvpkt->hdr.ackno < last_acked){
+            VLOG(DEBUG, "DOUBLE ACK seqno.");
+            doubleACKS++;
+            if (doubleACKS == 3){
+                doubleACKS = 0;
+                releaseAllPackets();
             }
+            continue;
+        }
 
-            recvpkt = (tcp_packet *)buffer;
+        last_acked = recvpkt -> hdr.ackno;
+        while((cwnd_begin !=0) && cwnd_begin->packet->hdr.seqno != last_acked){
 
-            // .Simple print statement to expose every ACK
-            
-            if (recvpkt->hdr.ackno < send_base){
-                VLOG(DEBUG, "DOUBLE ACK seqno.");
+            pop_packet();
+            --unackPackets;
+            VLOG(DEBUG, "Current unACK packets %d", unackPackets);
+
+            if (fileEnd == 1){
                 continue;
             }
-            VLOG(DEBUG, "ACKed packet with seq no. %d", recvpkt->hdr.ackno);
-            --unackPackets;
-        }
         
-
-        /*
-        do {
-            VLOG(DEBUG, "Sending packet %d to %s", 
-                    send_base, inet_ntoa(serveraddr.sin_addr));
-
-
-            if(sendto(sockfd, cwnd_buffer[9], sizeof(*(cwnd_buffer[9])), 0, 
-                        ( const struct sockaddr *)&serveraddr, serverlen) < 0)
-            {
-                error("sendto");
+            len = fread(buffer, 1, DATA_SIZE, fp);
+            if (len <= 0){
+                VLOG(INFO, "End Of File has been reached");
+                sndpkt = make_packet(0);
+                push_packet(sndpkt);
+                fileEnd = 1;
             }
 
-            start_timer();
-
- //ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,
-                        //struct sockaddr *src_addr, socklen_t *addrlen);
-
-
-            if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
-                        (struct sockaddr *) &serveraddr, (socklen_t *)&serverlen) < 0)
-            {
-                error("recvfrom");
+            else{
+                send_base = next_seqno;
+                next_seqno = send_base + len;
+                sndpkt = make_packet(len);
+                memcpy(sndpkt->data, buffer, len);
+                sndpkt->hdr.seqno = send_base;
+                push_packet(sndpkt);
             }
+            if(sendto(sockfd, cwnd_end -> packet, TCP_HDR_SIZE+cwnd_end->packet->hdr.data_size, 0, 
+                  ( const struct sockaddr *)&serveraddr, serverlen) < 0){
+            error("sendto");
+            }
+            VLOG(DEBUG, "Seq number sent %d ", cwnd_end ->packet ->hdr.seqno);
+            unackPackets += 1;
 
-            recvpkt = (tcp_packet *)buffer;
-
-            // .Simple print statement to expose every ACK
+            //waitFor(1);
+        }   
             
-
-            VLOG(DEBUG, "ACKed packet with seq no. %d", recvpkt->hdr.ackno);
-
-            stop_timer();
-
-            // resend pack if dont recv ack 
-        } while(recvpkt->hdr.ackno != next_seqno);
-
-        free(sndpkt);
-        
-
-    */
-        
-
-    }
-
+    } while (unackPackets != 0);
+    
     return 0;
-
 }
 
 
