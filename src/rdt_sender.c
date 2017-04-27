@@ -45,7 +45,11 @@ typedef struct node_packet{
 node_packet *cwnd_begin = 0;   
 node_packet *cwnd_end;
 
-
+void releaseAllPackets(void);
+void pop_packet(void);
+void push_packet(tcp_packet*);
+void start_timer(void);
+void stop_timer(void);
 /* .pushes a packet onto the cwnd lifo. Because the
     cwnd is a fixed size window, it is our
     responsibility to ensure that we don't cross
@@ -86,22 +90,6 @@ void pop_packet(){
 
 }
 
-void resend_packets(int sig)
-{
-    if (sig == SIGALRM)
-    {
-        //Resend all packets range between 
-        //sendBase and nextSeqNum
-        VLOG(INFO, "Timout happend");
-        /*
-        if(sendto(sockfd, sndpkt, sizeof(*sndpkt), 0, 
-                    ( const struct sockaddr *)&serveraddr, serverlen) < 0)
-        {
-            error("sendto");
-        }
-        */
-    }
-}
 
 
 void start_timer()
@@ -114,6 +102,25 @@ void start_timer()
 void stop_timer()
 {
     sigprocmask(SIG_BLOCK, &sigmask, NULL);
+}
+
+void resend_packets(int sig)
+{
+    if (sig == SIGALRM)
+    {
+        //Resend all packets range between 
+        //sendBase and nextSeqNum
+        VLOG(INFO, "Timout happend");
+        releaseAllPackets();
+        start_timer();
+        /*
+        if(sendto(sockfd, sndpkt, sizeof(*sndpkt), 0, 
+                    ( const struct sockaddr *)&serveraddr, serverlen) < 0)
+        {
+            error("sendto");
+        }
+        */
+    }
 }
 
 
@@ -248,9 +255,9 @@ int main (int argc, char **argv)
 
         
         
-    
-    releaseAllPackets();
 
+    releaseAllPackets();
+    start_timer();
 
     /* RDT transmission window in action.
      * Once we have released all the initial packets,
@@ -322,6 +329,7 @@ int main (int argc, char **argv)
 
             //waitFor(1);
         }   
+        start_timer();
             
     } while (unackPackets != 0);
     
