@@ -84,7 +84,7 @@ void pop_packet(){
         cwnd_begin = cwnd_begin -> nextPacket;
         free(temp);
         if (cwnd_begin != 0)
-        VLOG(DEBUG, "...Current window head at %d", cwnd_begin->packet->hdr.seqno);
+        //VLOG(DEBUG, "...Current window head at %d", cwnd_begin->packet->hdr.seqno);
         return;
     }
 
@@ -152,21 +152,21 @@ void waitFor (unsigned int secs) {
 /* Resends all the unacknowledged packets.
 */
 void releaseAllPackets(){
-    int j = 1;
+    //int j = 1;
     node_packet *temp = cwnd_begin;
     VLOG(DEBUG, "Going to send packets");
     while (temp != 0){
-        VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
-             j++, sizeof(*(temp -> packet)), inet_ntoa(serveraddr.sin_addr));
-
+        //VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
+          //   j++, sizeof(*(temp -> packet)), inet_ntoa(serveraddr.sin_addr));
+        VLOG(DEBUG, "Sending packet %d to %s", 
+                    temp->packet->hdr.seqno, inet_ntoa(serveraddr.sin_addr));
 
         if(sendto(sockfd, temp -> packet, TCP_HDR_SIZE+temp->packet->hdr.data_size, 0, 
                   ( const struct sockaddr *)&serveraddr, serverlen) < 0){
             error("sendto");
         }
-        VLOG(DEBUG, "Seq number sent %d ", temp ->packet ->hdr.seqno);
-        //waitFor(1);
-            //pop_packet();
+        //VLOG(DEBUG, "Seq number sent %d ", temp ->packet ->hdr.seqno);
+
         temp = temp -> nextPacket;
     }
 
@@ -298,7 +298,7 @@ int main (int argc, char **argv)
 
             pop_packet();
             --unackPackets;
-            VLOG(DEBUG, "Current unACK packets %d", unackPackets);
+            //VLOG(DEBUG, "Current unACK packets %d", unackPackets);
 
             if (fileEnd == 1){
                 continue;
@@ -306,7 +306,7 @@ int main (int argc, char **argv)
         
             len = fread(buffer, 1, DATA_SIZE, fp);
             if (len <= 0){
-                VLOG(INFO, "End Of File has been reached");
+                //VLOG(INFO, "End Of File has been reached");
                 sndpkt = make_packet(0);
                 push_packet(sndpkt);
                 fileEnd = 1;
@@ -324,7 +324,9 @@ int main (int argc, char **argv)
                   ( const struct sockaddr *)&serveraddr, serverlen) < 0){
             error("sendto");
             }
-            VLOG(DEBUG, "Seq number sent %d ", cwnd_end ->packet ->hdr.seqno);
+            VLOG(DEBUG, "Sending packet %d to %s", 
+                    send_base, inet_ntoa(serveraddr.sin_addr));
+            //VLOG(DEBUG, "Seq number sent %d ", cwnd_end ->packet ->hdr.seqno);
             unackPackets += 1;
 
             //waitFor(1);

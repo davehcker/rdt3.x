@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
         sndpkt = make_packet(0);
         sndpkt->hdr.ackno = recvpkt->hdr.seqno + recvpkt->hdr.data_size;
         sndpkt->hdr.ctr_flags = ACK;
-        VLOG(DEBUG, "current lastAcked %d", lastAcked);
+        //VLOG(DEBUG, "current lastAcked %d", lastAcked);
         lastAcked = sndpkt->hdr.ackno;
 
         if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
