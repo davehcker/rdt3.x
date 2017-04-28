@@ -108,18 +108,10 @@ void resend_packets(int sig)
 {
     if (sig == SIGALRM)
     {
-        //Resend all packets range between 
-        //sendBase and nextSeqNum
+        //Resend all packets in the current unACKed buffer.
         VLOG(INFO, "Timout happend");
         releaseAllPackets();
         start_timer();
-        /*
-        if(sendto(sockfd, sndpkt, sizeof(*sndpkt), 0, 
-                    ( const struct sockaddr *)&serveraddr, serverlen) < 0)
-        {
-            error("sendto");
-        }
-        */
     }
 }
 
@@ -140,8 +132,9 @@ void init_timer(int delay, void (*sig_handler)(int))
     sigemptyset(&sigmask);
     sigaddset(&sigmask, SIGALRM);
 }
+
 /* Sleep for given number of seconds. Can be interrupted by
- singnals.
+ singnals. Used for slowing down certain functions to debug easily.
 */
 void waitFor (unsigned int secs) {
     unsigned int retTime = time(0) + secs;   // Get finishing time.
@@ -274,6 +267,7 @@ int main (int argc, char **argv)
      * cwnd buffer.
      */
     int doubleACKS = 0;
+    int last_double_acked;
     do{ 
         if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
             (struct sockaddr *) &serveraddr, (socklen_t *)&serverlen) < 0){
@@ -281,19 +275,40 @@ int main (int argc, char **argv)
         }
 
         recvpkt = (tcp_packet *)buffer;
-        VLOG(DEBUG, "Received packet with ack no. %d", recvpkt->hdr.ackno);
+        VLOG(DEBUG, "Received packet with ack no. %d n last_acked %d", 
+            recvpkt->hdr.ackno, last_acked);
+        if (recvpkt->hdr.ackno == 0){
+            VLOG(DEBUG, "End of file declared by receiver.");
+            break;
+        }
+        if (recvpkt->hdr.ackno == last_acked){
+            last_double_acked = last_acked;
+        }
 
-        if (recvpkt->hdr.ackno < last_acked){
-            VLOG(DEBUG, "DOUBLE ACK seqno.");
+        if (recvpkt->hdr.ackno == last_double_acked){
+            fprintf(stderr, "Double ACK happened. Fast retransmit.\n");
+            //VLOG(DEBUG, "DOUBLE ACK seqno.");
             doubleACKS++;
             if (doubleACKS == 3){
                 doubleACKS = 0;
-                releaseAllPackets();
+                //releaseAllPackets();
+                if (cwnd_begin != 0){
+
+                    if(sendto(sockfd, cwnd_begin -> packet, TCP_HDR_SIZE+cwnd_begin->packet->hdr.data_size, 0, 
+                  ( const struct sockaddr *)&serveraddr, serverlen) < 0){
+            error("sendto");
+            }
+            VLOG(DEBUG, "Fast Retransmit : Resending ending packet %d to %s", 
+                    send_base, inet_ntoa(serveraddr.sin_addr));
+
+                }
             }
             continue;
         }
 
         last_acked = recvpkt -> hdr.ackno;
+
+        //move the window forward.
         while((cwnd_begin !=0) && cwnd_begin->packet->hdr.seqno != last_acked){
 
             pop_packet();
@@ -328,10 +343,10 @@ int main (int argc, char **argv)
                     send_base, inet_ntoa(serveraddr.sin_addr));
             //VLOG(DEBUG, "Seq number sent %d ", cwnd_end ->packet ->hdr.seqno);
             unackPackets += 1;
-
+            start_timer();
             //waitFor(1);
         }   
-        start_timer();
+        
             
     } while (unackPackets != 0);
     
