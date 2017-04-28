@@ -29,6 +29,8 @@ tcp_packet *recvpkt;
 tcp_packet *sndpkt;
 
 int main(int argc, char **argv) {
+    int r;
+
     int sockfd; /* socket */
     int portno; /* port to listen on */
     int clientlen; /* byte size of client's address */
@@ -92,6 +94,8 @@ int main(int argc, char **argv) {
 
     clientlen = sizeof(clientaddr);
     while (1) {
+        r = rand() % 20;
+        
         /*
          * recvfrom: receive a UDP datagram from a client
          */
@@ -101,12 +105,19 @@ int main(int argc, char **argv) {
             error("ERROR in recvfrom");
         }
 
-
+        if (r < 5){  VLOG(DEBUG, "SKIP");continue;}
         recvpkt = (tcp_packet *) buffer;
 
         if ( recvpkt->hdr.data_size == 0) {
             VLOG(INFO, "End Of File has been reached");
             fclose(fp);
+            sndpkt = make_packet(0);
+            sndpkt->hdr.ackno = 0;
+            if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
+                (struct sockaddr *) &clientaddr, clientlen) < 0) {
+            error("ERROR in sendto");
+            }
+
             break;
         }
 
@@ -133,7 +144,7 @@ int main(int argc, char **argv) {
         sndpkt = make_packet(0);
         sndpkt->hdr.ackno = recvpkt->hdr.seqno + recvpkt->hdr.data_size;
         sndpkt->hdr.ctr_flags = ACK;
-        //VLOG(DEBUG, "current lastAcked %d", lastAcked);
+        VLOG(DEBUG, "current lastAcked %d", lastAcked);
         lastAcked = sndpkt->hdr.ackno;
 
         if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
