@@ -29,7 +29,7 @@ tcp_packet *recvpkt;
 tcp_packet *sndpkt;
 
 int main(int argc, char **argv) {
-    int r;
+    //int r;
 
     int sockfd; /* socket */
     int portno; /* port to listen on */
@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
 
     clientlen = sizeof(clientaddr);
     while (1) {
-        // = rand() % 20;
+        //r = rand() % 30;
         
         /*
          * recvfrom: receive a UDP datagram from a client

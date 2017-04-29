@@ -22,14 +22,16 @@
 #include"common.h"
 
 #define STDIN_FD    0
-#define RETRY  1500 //milli second 
-#define CWND 10
+#define RETRY  4000 //milli second 
+#define CWND 6
 
 int next_seqno=0;
 int send_base=0;
 int last_acked = 0;
 int window_size = 1;
 int unackPackets;
+
+time_t now;
 
 int sockfd, serverlen;
 struct sockaddr_in serveraddr;
@@ -56,7 +58,6 @@ void stop_timer(void);
     the cwnd boundary.
 */
 void push_packet(tcp_packet *packet){
-    VLOG(DEBUG, "pushing");
     if (cwnd_begin == 0){
             cwnd_begin = malloc(sizeof(node_packet));
             cwnd_begin-> packet = packet;
@@ -77,7 +78,8 @@ void push_packet(tcp_packet *packet){
     to the next element in LIFO.
     */
 void pop_packet(){
-    VLOG(DEBUG, "pop");
+    //VLOG(DEBUG, "Popped packet with seq no. %d", cwnd_begin->packet->hdr.seqno);
+    //VLOG(DEBUG, "Last ACKD: %d", last_acked);
     if (cwnd_begin == 0){
         return;
     }
@@ -111,7 +113,9 @@ void resend_packets(int sig)
     if (sig == SIGALRM)
     {
         //Resend all packets in the current unACKed buffer.
-        VLOG(INFO, "Timout happend");
+        int sec;
+        sec = time(NULL);
+        VLOG(INFO, "Timout happend at %d", sec);
         releaseAllPackets();
         start_timer();
     }
@@ -302,7 +306,7 @@ int main (int argc, char **argv)
             error("sendto");
             }
             VLOG(DEBUG, "Fast Retransmit : Resending ending packet %d to %s", 
-                    send_base, inet_ntoa(serveraddr.sin_addr));
+                    cwnd_begin->packet->hdr.seqno, inet_ntoa(serveraddr.sin_addr));
 
                 }
             }
@@ -312,7 +316,7 @@ int main (int argc, char **argv)
         last_acked = recvpkt -> hdr.ackno;
 
         //move the window forward.
-        while((cwnd_begin !=0) && cwnd_begin->packet->hdr.seqno != last_acked){
+        while((cwnd_begin !=0) && (last_acked > cwnd_begin->packet->hdr.seqno) ){
 
             pop_packet();
             --unackPackets;
@@ -332,12 +336,15 @@ int main (int argc, char **argv)
             }
 
             
-                send_base = next_seqno;
-                next_seqno = send_base + len;
-                sndpkt = make_packet(len);
-                memcpy(sndpkt->data, buffer, len);
-                sndpkt->hdr.seqno = send_base;
-                push_packet(sndpkt);
+            send_base = next_seqno;
+            next_seqno = send_base + len;
+            sndpkt = make_packet(len);
+            memcpy(sndpkt->data, buffer, len);
+            sndpkt->hdr.seqno = send_base;
+            push_packet(sndpkt);
+            unackPackets += 1;
+
+            
             
             if(sendto(sockfd, cwnd_end -> packet, TCP_HDR_SIZE+cwnd_end->packet->hdr.data_size, 0, 
                   ( const struct sockaddr *)&serveraddr, serverlen) < 0){
@@ -346,10 +353,11 @@ int main (int argc, char **argv)
             VLOG(DEBUG, "Sending packet %d to %s", 
                     send_base, inet_ntoa(serveraddr.sin_addr));
             //VLOG(DEBUG, "Seq number sent %d ", cwnd_end ->packet ->hdr.seqno);
-            unackPackets += 1;
             start_timer();
+            }
+            
             //waitFor(1);
-        }   
+           
         
             
     } while (unackPackets != 0);
