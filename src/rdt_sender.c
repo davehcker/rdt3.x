@@ -56,6 +56,7 @@ void stop_timer(void);
     the cwnd boundary.
 */
 void push_packet(tcp_packet *packet){
+    VLOG(DEBUG, "pushing");
     if (cwnd_begin == 0){
             cwnd_begin = malloc(sizeof(node_packet));
             cwnd_begin-> packet = packet;
@@ -76,6 +77,7 @@ void push_packet(tcp_packet *packet){
     to the next element in LIFO.
     */
 void pop_packet(){
+    VLOG(DEBUG, "pop");
     if (cwnd_begin == 0){
         return;
     }
@@ -151,7 +153,7 @@ void releaseAllPackets(){
     while (temp != 0){
         //VLOG(DEBUG, "Sending packet %d with size %lu to %s", 
           //   j++, sizeof(*(temp -> packet)), inet_ntoa(serveraddr.sin_addr));
-        VLOG(DEBUG, "Sending packet %d to %s", 
+        VLOG(DEBUG, "Releasing packet %d to %s", 
                     temp->packet->hdr.seqno, inet_ntoa(serveraddr.sin_addr));
 
         if(sendto(sockfd, temp -> packet, TCP_HDR_SIZE+temp->packet->hdr.data_size, 0, 
@@ -227,11 +229,10 @@ int main (int argc, char **argv)
         len = fread(buffer, 1, DATA_SIZE, fp);
         if ( len <= 0){
             VLOG(INFO, "EOF File has been reached");
-            sndpkt = make_packet(0);
-            push_packet(sndpkt);
-            unackPackets += 1;
-            fileEnd = 1;
-            continue;
+            //sndpkt = make_packet(0);
+            //fileEnd = 1;
+            break;
+            len = 0;
         }
  
             
@@ -243,6 +244,7 @@ int main (int argc, char **argv)
         sndpkt->hdr.seqno = send_base;
         push_packet(sndpkt);
         unackPackets+= 1;
+
     }
     
 
@@ -277,9 +279,10 @@ int main (int argc, char **argv)
         recvpkt = (tcp_packet *)buffer;
         VLOG(DEBUG, "Received packet with ack no. %d n last_acked %d", 
             recvpkt->hdr.ackno, last_acked);
+
         if (recvpkt->hdr.ackno == 0){
             VLOG(DEBUG, "End of file declared by receiver.");
-            break;
+            //break;
         }
         if (recvpkt->hdr.ackno == last_acked){
             last_double_acked = last_acked;
@@ -313,7 +316,7 @@ int main (int argc, char **argv)
 
             pop_packet();
             --unackPackets;
-            //VLOG(DEBUG, "Current unACK packets %d", unackPackets);
+            VLOG(DEBUG, "Current unACK packets %d", unackPackets);
 
             if (fileEnd == 1){
                 continue;
@@ -321,20 +324,21 @@ int main (int argc, char **argv)
         
             len = fread(buffer, 1, DATA_SIZE, fp);
             if (len <= 0){
-                //VLOG(INFO, "End Of File has been reached");
+                VLOG(INFO, "End Of File has been reached");
                 sndpkt = make_packet(0);
-                push_packet(sndpkt);
+                len = 0;
+                //push_packet(sndpkt);
                 fileEnd = 1;
             }
 
-            else{
+            
                 send_base = next_seqno;
                 next_seqno = send_base + len;
                 sndpkt = make_packet(len);
                 memcpy(sndpkt->data, buffer, len);
                 sndpkt->hdr.seqno = send_base;
                 push_packet(sndpkt);
-            }
+            
             if(sendto(sockfd, cwnd_end -> packet, TCP_HDR_SIZE+cwnd_end->packet->hdr.data_size, 0, 
                   ( const struct sockaddr *)&serveraddr, serverlen) < 0){
             error("sendto");

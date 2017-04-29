@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include<stdio.h>
+#include <stdio.h>
 #include "packet.h"
 #include "common.h"
 #include <sys/time.h>
@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
 
     clientlen = sizeof(clientaddr);
     while (1) {
-        r = rand() % 20;
+        // = rand() % 20;
         
         /*
          * recvfrom: receive a UDP datagram from a client
@@ -105,11 +105,11 @@ int main(int argc, char **argv) {
             error("ERROR in recvfrom");
         }
 
-        if (r < 5){  VLOG(DEBUG, "SKIP");continue;}
+        //if (r < 3){  VLOG(DEBUG, "SKIP");continue;}
         recvpkt = (tcp_packet *) buffer;
 
-        if ( recvpkt->hdr.data_size == 0) {
-            VLOG(INFO, "End Of File has been reached");
+        if ( (recvpkt->hdr.data_size == 0) && (recvpkt->hdr.seqno == lastAcked)) {
+            //VLOG(INFO, "End Of File has been reached");
             fclose(fp);
             sndpkt = make_packet(0);
             sndpkt->hdr.ackno = 0;
@@ -123,8 +123,8 @@ int main(int argc, char **argv) {
 
  
         if ( (lastAcked>0) && (recvpkt->hdr.seqno != lastAcked)){ //.Out of order packet.
-            VLOG(DEBUG, "DoubleACK: seqno: %d and lastAcked: %d ",
-                recvpkt->hdr.seqno, lastAcked);
+            //VLOG(DEBUG, "DoubleACK: seqno: %d and lastAcked: %d ",
+                //recvpkt->hdr.seqno, lastAcked);
 
             //. resend the last in order packet.
             if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
         sndpkt = make_packet(0);
         sndpkt->hdr.ackno = recvpkt->hdr.seqno + recvpkt->hdr.data_size;
         sndpkt->hdr.ctr_flags = ACK;
-        VLOG(DEBUG, "current lastAcked %d", lastAcked);
+        //VLOG(DEBUG, "current lastAcked %d", lastAcked);
         lastAcked = sndpkt->hdr.ackno;
 
         if (sendto(sockfd, sndpkt, sizeof(sndpkt), 0, 
